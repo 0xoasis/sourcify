@@ -6,7 +6,12 @@ import semver from 'semver';
 import type { WorkerOptions } from 'worker_threads';
 import { Worker } from 'worker_threads';
 import { logDebug, logError, logInfo, logWarn } from '../logger';
-import { asyncExec, CompilerError, fetchWithBackoff } from './common';
+import {
+  asyncExec,
+  CompilerError,
+  fetchWithBackoff,
+  resolveCompilerArtifactPath,
+} from './common';
 import type {
   SolidityJsonInput,
   SolidityOutput,
@@ -81,11 +86,17 @@ export async function useSolidityCompiler(
   }
   let startCompilation: number;
   if (solcPath && !forceEmscripten) {
-    logDebug('Compiling with solc binary', { version, solcPath });
+    const absoluteSolcPath = path.resolve(solcPath);
+    logDebug('Compiling with solc binary', {
+      version,
+      solcPath: absoluteSolcPath,
+    });
     startCompilation = Date.now();
     try {
+      // spawn via asyncExec (no shell) so version/path cannot inject commands
       compiled = await asyncExec(
-        `${solcPath} --standard-json`,
+        absoluteSolcPath,
+        ['--standard-json'],
         inputStringified,
         250 * 1024 * 1024,
       );
@@ -141,7 +152,7 @@ export async function getSolcExecutable(
   version: string,
 ): Promise<string | null> {
   const fileName = `solc-${platform}-v${version}`;
-  const solcPath = path.join(solcRepoPath, fileName);
+  const solcPath = resolveCompilerArtifactPath(solcRepoPath, fileName, version);
   if (fs.existsSync(solcPath) && validateSolcPath(solcPath)) {
     logDebug('Found existing solc', { version, platform, solcPath });
     return solcPath;
@@ -254,7 +265,11 @@ export async function getSolcJs(
   }
 
   const fileName = `soljson-${version}.js`;
-  const solJsonPath = path.resolve(solJsonRepoPath, fileName);
+  const solJsonPath = resolveCompilerArtifactPath(
+    solJsonRepoPath,
+    fileName,
+    version,
+  );
 
   if (!fs.existsSync(solJsonPath)) {
     logDebug('Solc-js not found locally, downloading', {
