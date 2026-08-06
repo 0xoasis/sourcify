@@ -8,6 +8,11 @@ import {
   resolveCompilerArtifactPath,
 } from '../src/lib/common';
 import { getSolcExecutable, getSolcJs } from '../src/lib/solidityCompiler';
+import {
+  findVyperPlatform,
+  getVyperExecutable,
+  useVyperCompiler,
+} from '../src/lib/vyperCompiler';
 
 describe('assertSafeCompilerVersion / resolveCompilerArtifactPath', () => {
   const repo = path.join('/tmp', 'compilers-artifact-repo');
@@ -128,5 +133,66 @@ describe('asyncExec shell safety', () => {
     } finally {
       if (fs.existsSync(marker)) fs.unlinkSync(marker);
     }
+  });
+});
+
+describe('getVyperExecutable path safety', () => {
+  const vyperRepoPath = path.join('/tmp', 'compilers-vyper-repo-path-safety');
+
+  it('rejects path-traversing versions before fetch/write', async () => {
+    try {
+      await getVyperExecutable(
+        vyperRepoPath,
+        'darwin',
+        '0.3.7/../../../tmp/pwn',
+      );
+      expect.fail('Expected invalid version to be rejected');
+    } catch (e: any) {
+      expect(e.message).to.match(/Invalid compiler version/);
+    }
+  });
+
+  it('rejects shell-metacharacter versions before fetch/write', async () => {
+    try {
+      await getVyperExecutable(
+        vyperRepoPath,
+        'darwin',
+        '0.3.7+commit.abc;echo PWNED',
+      );
+      expect.fail('Expected invalid version to be rejected');
+    } catch (e: any) {
+      expect(e.message).to.match(/Invalid compiler version/);
+    }
+  });
+});
+
+describe('useVyperCompiler via spawn (no shell)', function () {
+  this.timeout(120000);
+  const vyperRepoPath = path.join('/tmp', 'compilers-vyper-repo');
+
+  it('compiles a simple contract through asyncExec/spawn', async function () {
+    if (!findVyperPlatform()) {
+      this.skip();
+    }
+    const compiledJSON = await useVyperCompiler(
+      vyperRepoPath,
+      '0.3.7+commit.6020b8bb',
+      {
+        language: 'Vyper',
+        sources: {
+          'test.vy': {
+            content: `@external
+def test() -> uint256:
+    return 42`,
+          },
+        },
+        settings: {
+          outputSelection: {
+            '*': ['*'],
+          },
+        },
+      },
+    );
+    expect(compiledJSON?.contracts?.['test.vy']?.test).to.not.equal(undefined);
   });
 });
